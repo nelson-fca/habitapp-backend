@@ -6,9 +6,9 @@ export const APP_CONFIG = {
   API_VERSION: 'v1',
   PROJECT_ID: 'habitapp-cb02c',
   COLLECTIONS: {
-    USERS: 'users',
-    HABITS: 'habits',
-    LOGS: 'logs',
+    USERS: 'usuarios',
+    HABITS: 'habitos',
+    LOGS: 'registros',
   },
   SYNC: {
     MAX_LOG_HISTORY_DAYS: 15, // Días de retención para el Job de limpieza
