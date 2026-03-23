@@ -6,8 +6,14 @@
       "ignore": [
         "node_modules",
         ".git",
+        ".firebase",
         "firebase-debug.log",
-        "firebase-debug.*.log"
+        "firebase-debug.*.log",
+        "*.tsbuildinfo",
+        ".env",
+        ".env.*.local",
+        "firestore.indexes.json",
+        "firestore.rules"
       ],
       "predeploy": [
         "npm run build"

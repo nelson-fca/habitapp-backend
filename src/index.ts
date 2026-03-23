@@ -1,9 +1,10 @@
-import * as functions from 'firebase-functions';
+import { onRequest } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as admin from 'firebase-admin';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import { AppError, ErrorCode, ExceptionHandler } from './core/errors/app_error';
+import { ExceptionHandler } from './core/errors/app_error';
 
 // 1. Inicializar Firebase Admin
 admin.initializeApp();
@@ -27,8 +28,6 @@ import { syncRouter } from './features/sync/infrastructure/sync_controller';
 import { HabitLogService } from './features/habits/application/habit_log_service';
 import { HabitLogRepository } from './features/habits/infrastructure/habit_log_repository';
 
-// ... (admin already init)
-
 // 4. Register Feature Routers
 app.use('/v1/habits', habitsRouter);
 app.use('/v1/habits/logs', logsRouter);
@@ -40,27 +39,29 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   res.status(handledError.statusCode).json(handledError.toJSON());
 });
 
-// 6. Exportar como Firebase Function
-export const api = functions.https.onRequest(app);
+// 6. Exportar como Firebase Function (v2)
+export const api = onRequest({ region: "us-central1", memory: "256MiB" }, app);
 
 // 7. Job Programado: Limpieza de logs (Domingos 23:59)
-// Borra registros mayores a 15 días para optimizar Firestore.
 const logService = new HabitLogService(new HabitLogRepository());
 
-export const cleanupOldLogsJob = functions.pubsub
-  .schedule('every sunday 23:59')
-  .timeZone('America/Bogota')
-  .onRun(async (context) => {
-    console.log('[JOBS]: Iniciando limpieza de logs globales...');
-    
-    // Obtenemos todos los usuarios (Simplificado)
-    // En producción masiva, usaríamos un cursor o shard-id
-    const usersSnapshot = await admin.firestore().collection('users').get();
-    
-    for (const userDoc of usersSnapshot.docs) {
+export const cleanupOldLogsJob = onSchedule({
+  schedule: 'every sunday 23:59',
+  timeZone: 'America/Bogota',
+  region: 'us-central1'
+}, async (event) => {
+  console.log('[JOBS]: Iniciando limpieza de logs globales...');
+  
+  const db = admin.firestore();
+  const usersSnapshot = await db.collection('users').get();
+  
+  for (const userDoc of usersSnapshot.docs) {
+    try {
       await logService.cleanupOldLogs(userDoc.id);
+    } catch (error) {
+      console.error(`[JOBS]: Error limpiando logs para usuario ${userDoc.id}:`, error);
     }
-    
-    console.log('[JOBS]: Limpieza finalizada.');
-    return null;
-  });
+  }
+  
+  console.log('[JOBS]: Limpieza finalizada.');
+});
