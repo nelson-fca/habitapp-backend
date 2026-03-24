@@ -14,12 +14,26 @@ export class HabitLogRepository {
       .collection(APP_CONFIG.COLLECTIONS.LOGS);
   }
 
+  /** Enriquece un documento de log con campos obligatorios */
+  private enrich(userId: string, data: FirebaseFirestore.DocumentData): HabitLogModel {
+    const now = new Date().toISOString();
+    return {
+      id: data.id,
+      habitId: data.habitId || '',
+      userId: userId,            // Siempre usar el UID real del path
+      date: data.date || now.split('T')[0],
+      completed: data.completed === true,
+      createdAt: data.createdAt || data.updatedAt || now,
+      updatedAt: data.updatedAt || now,
+    };
+  }
+
   /**
    * Obtiene todos los logs de un usuario (Para primera sincronización)
    */
   async findAll(userId: string): Promise<HabitLogModel[]> {
     const snapshot = await this.getCollection(userId).get();
-    return snapshot.docs.map((doc) => doc.data() as HabitLogModel);
+    return snapshot.docs.map((doc) => this.enrich(userId, doc.data()));
   }
 
   /**
@@ -30,13 +44,13 @@ export class HabitLogRepository {
   }
 
   /**
-   * Obtiene cambios desde una fecha específica (Para Sync)
+   * Obtiene cambios desde una fecha específica (Para Sync incremental)
    */
   async findChangesSince(userId: string, lastSync: string): Promise<HabitLogModel[]> {
     const snapshot = await this.getCollection(userId)
       .where('updatedAt', '>', lastSync)
       .get();
-    return snapshot.docs.map((doc) => doc.data() as HabitLogModel);
+    return snapshot.docs.map((doc) => this.enrich(userId, doc.data()));
   }
 
   /**
@@ -46,12 +60,9 @@ export class HabitLogRepository {
     const snapshot = await this.getCollection(userId)
       .where('date', '<', dateLimit)
       .get();
-    
-    // Batch delete para eficiencia y costo
     const batch = admin.firestore().batch();
     snapshot.docs.forEach((doc) => batch.delete(doc.ref));
     await batch.commit();
-    
     return snapshot.size;
   }
 }
