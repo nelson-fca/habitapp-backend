@@ -15,6 +15,14 @@ export class HabitLogRepository {
   }
 
   /**
+   * Obtiene todos los logs de un usuario (Para primera sincronización)
+   */
+  async findAll(userId: string): Promise<HabitLogModel[]> {
+    const snapshot = await this.getCollection(userId).get();
+    return snapshot.docs.map((doc) => doc.data() as HabitLogModel);
+  }
+
+  /**
    * Registra o actualiza un log
    */
   async save(userId: string, log: HabitLogModel): Promise<void> {

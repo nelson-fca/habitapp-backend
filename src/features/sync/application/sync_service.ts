@@ -1,8 +1,6 @@
 import { SyncRequestDTO, SyncResponseDTO } from '../domain/sync_models';
 import { HabitRepository } from '../../habits/infrastructure/habit_repository';
 import { HabitLogRepository } from '../../habits/infrastructure/habit_log_repository';
-import { HabitModel } from '../../habits/domain/habit_model';
-import { HabitLogModel } from '../../habits/domain/habit_log_model';
 
 /**
  * Servicio Engine de Sincronización
@@ -17,28 +15,56 @@ export class SyncService {
    * Procesa una solicitud de sincronización completa
    */
   async processSync(userId: string, request: SyncRequestDTO): Promise<SyncResponseDTO> {
-    const { lastSyncTimestamp, habits, logs } = request;
+    const { lastSyncTimestamp, habits = [], logs = [] } = request;
     const serverTimestamp = new Date().toISOString();
 
     // 1. PUSH: Procesar cambios que vienen del Cliente
-    // Para simplificar, usamos el repositorio para guardar (el repo ya hace merge: true)
-    // En una App Pro, validaríamos el updatedAt para evitar sobreescribir datos más nuevos en el servidor
     for (const remoteHabit of habits) {
+      const habitToSave = {
+        ...remoteHabit,
+        userId: userId,
+        createdAt: remoteHabit.createdAt || remoteHabit.updatedAt || serverTimestamp,
+        updatedAt: remoteHabit.updatedAt || serverTimestamp,
+      };
       const localHabit = await this.habitRepo.findById(userId, remoteHabit.id);
-      if (!localHabit || new Date(remoteHabit.updatedAt) > new Date(localHabit.updatedAt)) {
-        await this.habitRepo.save(userId, remoteHabit);
+      const remoteDate = new Date(habitToSave.updatedAt);
+      const localDate = localHabit ? new Date(localHabit.updatedAt) : new Date(0);
+      if (!localHabit || remoteDate >= localDate) {
+        await this.habitRepo.save(userId, habitToSave);
       }
     }
 
     for (const remoteLog of logs) {
-      // Los logs usualmente son deterministas por fecha, pero igual usamos el save con merge
-      await this.logRepo.save(userId, remoteLog);
+      const logToSave = {
+        ...remoteLog,
+        userId: userId,
+        createdAt: remoteLog.createdAt || remoteLog.updatedAt || serverTimestamp,
+        updatedAt: remoteLog.updatedAt || serverTimestamp,
+      };
+      await this.logRepo.save(userId, logToSave);
     }
 
     // 2. PULL: Obtener cambios desde el Servidor para el Cliente
-    // Buscamos todo lo que se actualizó después de la última sincronización del cliente
-    const habitsToPull = await this.habitRepo.findChangesSince(userId, lastSyncTimestamp);
-    const logsToPull = await this.logRepo.findChangesSince(userId, lastSyncTimestamp);
+    // Si lastSyncTimestamp es la época (primer login), traer TODO
+    let habitsToPull;
+    let logsToPull;
+
+    const isFirstSync =
+      !lastSyncTimestamp ||
+      lastSyncTimestamp === '1970-01-01T00:00:00Z' ||
+      lastSyncTimestamp === '1970-01-01T00:00:00.000Z';
+
+    if (isFirstSync) {
+      // Primera sincronización: traer todos los datos del usuario sin filtro de fecha
+      console.log(`[SyncService] Primera sincronización detectada para userId: ${userId}. Trayendo todos los datos.`);
+      habitsToPull = await this.habitRepo.findAll(userId);
+      logsToPull = await this.logRepo.findAll(userId);
+    } else {
+      // Sincronización incremental: solo traer cambios nuevos
+      console.log(`[SyncService] Sincronización incremental desde: ${lastSyncTimestamp}`);
+      habitsToPull = await this.habitRepo.findChangesSince(userId, lastSyncTimestamp);
+      logsToPull = await this.logRepo.findChangesSince(userId, lastSyncTimestamp);
+    }
 
     return {
       serverTimestamp,
